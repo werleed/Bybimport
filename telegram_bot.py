@@ -16,8 +16,13 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 FLW_SECRET_KEY = os.getenv("FLW_SECRET_KEY")
 GROUP_ID = os.getenv("GROUP_ID")
 
-if not BOT_TOKEN or not FLW_SECRET_KEY or not GROUP_ID:
-    raise ValueError("❌ Missing environment variables! Please set BOT_TOKEN, FLW_SECRET_KEY, and GROUP_ID.")
+# Check each variable individually for better debugging
+if not BOT_TOKEN:
+    raise ValueError("❌ Missing BOT_TOKEN in environment variables.")
+if not FLW_SECRET_KEY:
+    raise ValueError("❌ Missing FLW_SECRET_KEY in environment variables.")
+if not GROUP_ID:
+    raise ValueError("❌ Missing GROUP_ID in environment variables.")
 
 GROUP_ID = int(GROUP_ID)
 
