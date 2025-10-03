@@ -26,7 +26,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "7003416998"))
 verified_users = {}
 
 # Flutterwave Sandbox Payment Link (replace with live later)
-FLW_PAY_LINK = "https://sandbox.flutterwave.com/pay/osi7s2n4i39v"
+FLW_PAY_LINK = "https://sandbox.flutterwave.com/pay/tc3vmlsw4xum"
 
 # -------- MENU --------
 def build_menu():
