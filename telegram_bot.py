@@ -1,4 +1,3 @@
-
 import os
 import sqlite3
 import logging
@@ -83,10 +82,10 @@ def admin_menu():
 def generate_coupon(user_id: int):
     c.execute("SELECT payment_status FROM users WHERE user_id=?", (user_id,))
     row = c.fetchone()
-    if row and row[0] == "approved":
+    if row and row[0] == "approved":  # don't issue coupon to approved users
         return None, None
 
-    c.execute("SELECT COUNT(*) FROM coupons")
+    c.execute("SELECT COUNT(*) FROM coupons WHERE used=0")
     total = c.fetchone()[0]
     if total >= POOL_SIZE:
         return None, None
@@ -95,16 +94,25 @@ def generate_coupon(user_id: int):
     expiry = datetime.utcnow() + timedelta(hours=COUPON_EXPIRY_HOURS)
 
     c.execute("INSERT OR REPLACE INTO coupons (code, assigned_to, expiry, used) VALUES (?, ?, ?, 0)",
-              (code, user_id, expiry))
+              (code, user_id, expiry.isoformat()))
     c.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     c.execute("UPDATE users SET coupon_code=?, coupon_expiry=? WHERE user_id=?",
-              (code, expiry, user_id))
+              (code, expiry.isoformat(), user_id))
     conn.commit()
     return code, expiry
 
 def get_coupon(user_id: int):
     c.execute("SELECT coupon_code, coupon_expiry FROM users WHERE user_id=?", (user_id,))
-    return c.fetchone()
+    row = c.fetchone()
+    if row and row[0] and row[1]:
+        expiry = datetime.fromisoformat(str(row[1]))
+        if datetime.utcnow() > expiry:
+            # Expire coupon
+            c.execute("UPDATE users SET coupon_code=NULL, coupon_expiry=NULL WHERE user_id=?", (user_id,))
+            c.execute("UPDATE coupons SET used=1 WHERE code=?", (row[0],))
+            conn.commit()
+            return None
+    return row
 
 def get_payment_status(user_id: int):
     c.execute("SELECT payment_status FROM users WHERE user_id=?", (user_id,))
@@ -130,16 +138,15 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     args = context.args
 
+    # ✅ Lock referral: only first time
     if args and args[0].isdigit():
         ref_id = int(args[0])
         if ref_id != user_id:
             c.execute("SELECT referred_by FROM users WHERE user_id=?", (user_id,))
             row = c.fetchone()
-            if not row:
+            if row is None:  # new user
                 c.execute("INSERT INTO users (user_id, referred_by) VALUES (?, ?)", (user_id, ref_id))
-            elif row and row[0] is None:
-                c.execute("UPDATE users SET referred_by=? WHERE user_id=?", (ref_id, user_id))
-            conn.commit()
+                conn.commit()
 
     if user_id == ADMIN_ID:
         await update.message.reply_text("🔐 Welcome Admin!", reply_markup=admin_menu())
@@ -176,7 +183,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 msg = "⚠️ No coupons available.\n💰 Pay: *₦60,000*"
         else:
             code, expiry = coupon
-            hours_left = int((expiry - datetime.utcnow()).total_seconds() // 3600)
+            hours_left = int((datetime.fromisoformat(str(expiry)) - datetime.utcnow()).total_seconds() // 3600)
             msg = f"🎟️ Coupon: `{code}`\nExpires in: {hours_left} hours\n💰 Pay: *₦45,000*"
 
         await update.message.reply_text(
@@ -188,7 +195,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         coupon = get_coupon(user_id)
         if coupon:
             code, expiry = coupon
-            hours_left = int((expiry - datetime.utcnow()).total_seconds() // 3600)
+            hours_left = int((datetime.fromisoformat(str(expiry)) - datetime.utcnow()).total_seconds() // 3600)
             await update.message.reply_text(f"🎟️ Coupon: `{code}`\nExpires in: {hours_left} hours", parse_mode="Markdown")
         else:
             await update.message.reply_text("❌ No coupon assigned.")
@@ -228,7 +235,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"🎟️ Used: {used}\nUnused: {unused}")
 
         elif text == "🔄 Reissue Coupon":
-            c.execute("SELECT code, assigned_to FROM coupons WHERE expiry < ? AND used=0", (datetime.utcnow(),))
+            c.execute("SELECT code, assigned_to FROM coupons WHERE expiry < ? AND used=0", (datetime.utcnow().isoformat(),))
             expired = c.fetchall()
             if not expired:
                 await update.message.reply_text("✅ No expired coupons.")
@@ -291,6 +298,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uid = int(data.split("_")[1])
         set_payment_status(uid, "approved")
 
+        # Referral bonus
         c.execute("SELECT referred_by FROM users WHERE user_id=?", (uid,))
         ref = c.fetchone()
         if ref and ref[0]:
