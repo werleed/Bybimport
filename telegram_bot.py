@@ -67,6 +67,7 @@ def user_menu():
         [KeyboardButton("💳 Pay with Bank Transfer")],
         [KeyboardButton("🎟️ My Coupon"), KeyboardButton("📋 My Payment Status")],
         [KeyboardButton("💰 My Wallet"), KeyboardButton("👥 My Referral Link")],
+        [KeyboardButton("👥 My Referrals")],
         [KeyboardButton("📞 Contact Support")]
     ], resize_keyboard=True)
 
@@ -212,9 +213,27 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
         await update.message.reply_text(f"👥 Share your referral link:\n{link}")
 
+    elif text == "👥 My Referrals":
+        # Count successful and failed referrals
+        c.execute("SELECT user_id, payment_status FROM users WHERE referred_by=?", (user_id,))
+        refs = c.fetchall()
+        if not refs:
+            await update.message.reply_text("❌ You have no referrals yet.")
+        else:
+            success = sum(1 for r in refs if r[1] == "approved")
+            failed = sum(1 for r in refs if r[1] != "approved")
+            bonus = get_wallet(user_id)
+            await update.message.reply_text(
+                f"👥 Referral Report:\n\n"
+                f"✅ Successful: {success}\n"
+                f"❌ Failed/Unpaid: {failed}\n"
+                f"💰 Total Bonus in Wallet: ₦{bonus}"
+            )
+
     elif text == "📞 Contact Support":
         await update.message.reply_text(f"📞 Support: {SUPPORT_USERNAME}")
 
+    # --- Admin menu (unchanged) ---
     elif user_id == ADMIN_ID:
         if text == "📝 Pending Payments":
             c.execute("SELECT user_id FROM users WHERE payment_status='pending'")
